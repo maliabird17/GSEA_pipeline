@@ -1,0 +1,307 @@
+---
+title: "Zebrafish Transcriptomic Analysis"
+author: "Malia Bird"
+date: '2022-07-31'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r loading}
+library(DESeq2)
+library(dplyr)
+library(tidyverse)
+library(janitor)
+library(AnnotationDbi)
+library(readxl)
+library("org.Dr.eg.db")
+library("org.Hs.eg.db")
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+```{r dropbox conversion}
+
+dropbox_to_dataframe <- function(link, h = TRUE) {
+  raw_link <- gsub("dl=0", "raw=1", link) # exracting raw file from dropbox link
+  df <- data.frame(read.csv(raw_link, sep = "\t", header = h,  stringsAsFactors = FALSE)) # load as dataframe
+  df # return dataframe
+}
+
+
+
+```
+
+```{r mapping}
+
+mapping_fish_to_human <- function(fish_data, column_name, export_name) {
+  
+  # Load from dropbox 
+  df <- dropbox_to_dataframe(fish_data)
+  
+  samples <- c(colnames(df))
+  preprocessed <- nrow(df) # number of genes input
+
+  # Load ensembl ortholog map (zebrafish and human ensembl ids)
+  ensembl_data <- data.frame(read.csv("https://www.dropbox.com/s/93kjxvac9jjnyxq/ensembl_human_zebra_map.txt?raw=1", sep = ",", header = TRUE)) %>% 
+  clean_names() %>% 
+  select(gene_stable_id, human_gene_stable_id) %>% 
+  distinct()
+  
+  # Merging ensembl database onto input transcriptomic data
+  data_mapped <- df %>%
+    merge(ensembl_data, by.x = column_name , by.y = "gene_stable_id") %>% 
+    na_if("") %>%
+    filter(!is.na(human_gene_stable_id))
+  
+  # Calculating efficiency of mapping 
+  post_processed <- nrow(data_mapped) # number of genes mapped
+  efficiency = (post_processed/preprocessed)*100 # efficiency of mapping
+  print(c('Percent of genes mapped to human genes:', efficiency))
+  
+  # Formatting final file for GSEA 
+  data_mapped['Description'] <- NA
+  
+  df_to_export <- data_mapped %>%
+    rename("NAME" = "human_gene_stable_id") %>% 
+    subset(select = append(c('NAME', 'Description'), samples[2:length(samples)]))
+  
+  write.table(df_to_export, file = export_name, sep = "\t",
+            row.names = FALSE, col.names = TRUE, quote = FALSE)
+}
+
+mapping_fish_to_human("https://www.dropbox.com/s/m4y980lfjimgv6d/intestine_norm_counts_naz.txt?dl=0", "GeneId", "intenstine_naz_TERT_WT.txt")
+
+```
+
+```{r testing}
+
+fish_data = "https://www.dropbox.com/s/26v2vmdy2zn3cmk/Batch_noCre_WT.normalized_countsTESTIS.txt?dl=0"
+column_name = "gene_id"
+export_name = "testis_ensembl_NOCRE_WT.txt"
+
+mapping_fish_to_human(fish_data, column_name, export_name)
+
+```
+
+```{r hallmark categories}
+
+cellular_component <- data.frame(id = 'cellular_component', Hallmark = c('HALLMARK_APICAL_JUNCTION', 'HALLMARK_APICAL_SURFACE',
+                       'HALLMARK_PEROXISOME'))
+
+development <- data.frame(id = 'development', Hallmark = c('HALLMARK_ADIPOGENESIS', 'HALLMARK_ANGIOGENESIS', 'HALLMARK_EPITHELIAL_MESENCHYMAL_TRANSITION',
+                'HALLMARK_MYOGENESIS', 'HALLMARK_SPERMATOGENESIS', 'HALLMARK_PANCREAS_BETA_CELL'))
+
+dna_damage <- data.frame(id = 'dna_damage', Hallmark = c('HALLMARK_DNA_REPAIR', 'HALLMARK_UV_RESPONSE_DN', 'HALLMARK_UV_RESPONSE_UP'))
+
+immune <- data.frame(id = 'immune', Hallmark = c('HALLMARK_ALLOGRAFT_REJECTION', 'HALLMARK_COAGULATION', 'HALLMARK_COMPLEMENT',
+           'HALLMARK_INTERFERON_ALPHA_RESPONSE', 'HALLMARK_INTERFERON_GAMMA_RESPONSE',
+           'HALLMARK_IL6_JAK_STAT3_SIGNALING', 'HALLMARK_INFLAMMATORY_RESPONSE'))
+
+metabolic <- data.frame(id = 'metabolic', Hallmark = c('HALLMARK_BILE_ACID_METABOLISM', 'HALLMARK_CHOLESTEROL_HOMEOSTASIS', 
+              'HALLMARK_FATTY_ACID_METABOLISM', 'HALLMARK_GLYCOLYSIS', 'HALLMARK_HEME_METABOLISM',
+              'HALLMARK_OXIDATIVE_PHOSPHORYLATION', 'HALLMARK_XENOBIOTIC_METABOLISM'))
+
+pathway <- data.frame(id = 'pathway', Hallmark = c('HALLMARK_APOPTOSIS', 'HALLMARK_HYPOXIA', 'HALLMARK_PROTEIN_SECRETION',
+            'HALLMARK_UNFOLDED_PROTEIN_RESPONSE', 'HALLMARK_REACTIVE_OXYGEN_SPECIES_PATHWAY'))
+
+proliferation <- data.frame(id = 'proliferation', Hallmark = c('HALLMARK_E2F_TARGETS', 'HALLMARK_G2M_CHECKPOINT', 'HALLMARK_MYC_TARGETS_V1', 'HALLMARK_MYC_TARGETS_V2', 'HALLMARK_	P53_PATHWAY', 'HALLMARK_MITOTIC_SPINDLE'))
+
+signaling <- data.frame(id = 'signaling', Hallmark = c('HALLMARK_ANDROGEN_RESPONSE', 'HALLMARK_ESTROGEN_RESPONSE_EARLY', 
+              'HALLMARK_ESTROGEN_RESPONSE_LATE',
+              'HALLMARK_IL2_JAK_STAT5_SIGNALING', 'HALLMARK_KRAS_SIGNALING_UP', 'HALLMARK_KRAS_SIGNALING_DN', 
+              'HALLMARK_MTORC1_SIGNALING', 'HALLMARK_NOTCH_SIGNALING', 'HALLMARK_PI3K_AKT_MTOR_SIGNALING',
+              'HALLMARK_HEDGEHOG_SIGNALING', 'HALLMARK_TGF_BETA_SIGNALING', 'HALLMARK_TNFA_SIGNALING_VIA_NFKB',
+              'HALLMARK_WNT_BETA_CATENIN_SIGNALING'))
+
+senescence <- data.frame(id = 'senescence', Hallmark = c('REACTOME_SENESCENCE_ASSOCIATED_SECRETORY_PHENOTYPE_SASP', 'FRIDMAN_SENESCENCE_UP', 'FRIDMAN_SENESCENCE_DN'))
+
+# COLOR TABLE
+color_code <- c("#404040", "#E7298A", "#1B9E77", "#D95F02", "#E6AB02", "#66A61E", 
+                  "#7570B3", "#A6761D", "#939799")
+id <- c("signaling", "immune", "proliferation", "dna_damage", "cellular_component", "development", "metabolic", "pathway", "senescence")
+df_colors <- data.frame(color_code, id)
+
+```
+
+
+```{r dotplots}
+
+dotplot <- function(gsea_data_wt, gsea_data_cre, title_name) {
+  
+  enriched_cre <- dropbox_to_dataframe(gsea_data_cre) %>%
+    select(NAME, NES, NOM.p.val, FDR.q.val) %>%
+    rename(Hallmark = NAME) %>%
+    rename(FDR = FDR.q.val) %>%
+    cbind(Group = 'TERT')
+  
+  enriched_cre$NES <- abs(enriched_cre$NES)
+  
+  enrich_cre_annotated <- rbind(
+    merge(enriched_cre, cellular_component, by = "Hallmark"),
+    merge(enriched_cre, development, by = "Hallmark"),
+    merge(enriched_cre, dna_damage, by = "Hallmark"),
+    merge(enriched_cre, metabolic, by = "Hallmark") ,
+    merge(enriched_cre, immune, by = "Hallmark") ,
+    merge(enriched_cre, pathway, by = "Hallmark") ,
+    merge(enriched_cre, proliferation, by = "Hallmark") ,
+    merge(enriched_cre, signaling, by = "Hallmark"), 
+    merge(enriched_cre, senescence, by = "Hallmark")
+  )
+  
+  enriched_wt <- dropbox_to_dataframe(gsea_data_wt) %>%
+    select(NAME, NES, NOM.p.val, FDR.q.val) %>%
+    rename(Hallmark = NAME) %>%
+    rename(FDR = FDR.q.val) %>%
+    cbind(Group = 'WT') 
+  
+  enriched_wt$NES <- abs(enriched_wt$NES)
+  
+  enrich_wt_annotated <- rbind(
+    merge(enriched_wt, cellular_component, by = "Hallmark"),
+    merge(enriched_wt, development, by = "Hallmark"),
+    merge(enriched_wt, dna_damage, by = "Hallmark"),
+    merge(enriched_wt, metabolic, by = "Hallmark") ,
+    merge(enriched_wt, immune, by = "Hallmark") ,
+    merge(enriched_wt, pathway, by = "Hallmark") ,
+    merge(enriched_wt, proliferation, by = "Hallmark") ,
+    merge(enriched_wt, signaling, by = "Hallmark"), 
+    merge(enriched_wt, senescence, by = "Hallmark") 
+  )
+  
+  unfiltered_enriched <- rbind(enrich_cre_annotated, enrich_wt_annotated) %>%
+    filter(FDR <= 0.25) 
+  
+  enrich_cre_filtered <- enrich_cre_annotated %>% 
+    filter(NOM.p.val <= 0.05 & FDR <= 0.05) 
+  
+  enrich_wt_filtered <- enrich_wt_annotated %>% 
+    filter(NOM.p.val <= 0.05 & FDR <= 0.05) 
+  
+  store_all_enriched <- rbind(enrich_cre_filtered, enrich_wt_filtered) 
+  
+  all_enriched <- store_all_enriched %>%
+    rbind(unfiltered_enriched) %>%
+    distinct() %>%
+    arrange(id, NES) %>%
+    subset(Hallmark %in% store_all_enriched$Hallmark) %>%
+    add_count(id) %>%
+    merge(df_colors) 
+  
+  all_enriched$Group <- factor(all_enriched$Group, levels = c('WT', 'TERT'))
+  all_enriched$Hallmark <- factor(all_enriched$Hallmark, levels = unique(all_enriched$Hallmark[order(all_enriched$n, all_enriched$id, all_enriched$NES)]))
+  all_enriched$color_code <- factor(all_enriched$color_code, levels = unique(all_enriched$color_code[order(all_enriched$n, all_enriched$id, all_enriched$NES)]))
+  
+  all_enriched <- all_enriched[with(all_enriched, order(n, id, NES)), ]
+  
+  colors_enriched <- all_enriched %>%
+    filter(duplicated(Hallmark) == FALSE) 
+
+  color_vector = as.character(colors_enriched$color_code)
+
+  
+  # PLOT
+  # Ordering hallmarks and groups 
+  S1<- ggplot(all_enriched, aes(x= Group, y=Hallmark, size= NES, color= FDR, group= Group)) + geom_point(alpha = 0.8)  # dotplot 
+  mytheme <- theme_classic() + theme(axis.text.y= element_text(face = 'bold', color = color_vector)) # coloring 
+                                                                                          
+  S1 = S1+ mytheme + scale_color_gradient(low = "red2",  high = "mediumblue", space = "Lab", limit = c(-0.000000000000000007, 0.05))
+  title = ggtitle(title_name)
+  S1 +title+ scale_size(range = c(1.5, 6))
+  
+}
+
+```
+
+```{r dotplot prints}
+
+gsea_data_wt = "https://www.dropbox.com/s/to06579x0xfac1c/gsea_report_for_NoCre_expanded.tsv?dl=0"
+gsea_data_cre = "https://www.dropbox.com/s/2sp27yypoawekui/gsea_report_for_NoCre_expanded.tsv?dl=0"
+title_name = "GUT: UPREGULATED in tert -/-"
+
+dotplot(gsea_data_wt, gsea_data_cre, title_name)
+
+```
+
+```{r dotplot prints}
+
+gsea_data_wt = "https://www.dropbox.com/s/bmh50lfe13t93ai/gsea_report_for_WT_expanded.tsv?dl=0"
+gsea_data_cre = "https://www.dropbox.com/s/kj9jdps1iu0qtkt/gsea_report_for_WithCre_expanded.tsv?dl=0"
+title_name = "GUT: DOWNREGULATED in tert -/-"
+
+dotplot(gsea_data_wt, gsea_data_cre, title_name)
+
+```
+
+```{r dotplot prints}
+
+gsea_data_wt = "https://www.dropbox.com/s/kjjrsv75zw3niip/gsea_report_for_NoCre_expanded.tsv?dl=0"
+gsea_data_cre = "https://www.dropbox.com/s/kmhhm302cd9ftvp/gsea_report_for_NoCre_expanded.tsv?dl=0"
+title_name = "KIDNEY: UPREGULATED in tert -/-"
+
+dotplot(gsea_data_wt, gsea_data_cre, title_name)
+
+```
+
+```{r dotplot prints}
+
+gsea_data_wt = "https://www.dropbox.com/s/73yx48e3br1ypiz/gsea_report_for_WT_expanded.tsv?dl=0"
+gsea_data_cre = "https://www.dropbox.com/s/xcz3ssk5v24fz8i/gsea_report_for_WithCre_expanded.tsv?dl=0"
+title_name = "KIDNEY: DOWNREGULATED in tert -/-"
+
+dotplot(gsea_data_wt, gsea_data_cre, title_name)
+
+```
+
+```{r}
+
+testis_NOCRE_wt <- dropbox_to_dataframe("https://www.dropbox.com/s/bm7srepw48m1hla/gsea_report_for_NoCre_expanded.tsv?dl=0")
+
+```
+
+```{r dotplot prints}
+
+gsea_data_wt = "https://www.dropbox.com/s/9cnoxuarecri3yn/gsea_report_for_NoCre_expanded.tsv?dl=0"
+gsea_data_cre = "https://www.dropbox.com/s/bm7srepw48m1hla/gsea_report_for_NoCre_expanded.tsv?dl=0"
+title_name = "TESTIS: UPREGULATED in tert -/-"
+
+dotplot(gsea_data_wt, gsea_data_cre, title_name)
+
+```
+
+```{r dotplot prints}
+
+gsea_data_wt = "https://www.dropbox.com/s/i04ih8f3chulw8u/gsea_report_for_WT_expanded.tsv?dl=0"
+gsea_data_cre = "https://www.dropbox.com/s/3pq4b7c9i6in7pb/gsea_report_for_WithCre_expanded.tsv?dl=0"
+title_name = "TESTIS: DOWNREGULATED in tert -/-"
+
+dotplot(gsea_data_wt, gsea_data_cre, title_name)
+
+```
+
+```{r dotplot prints}
+
+gsea_data_wt = "https://www.dropbox.com/s/1h4k9u5m4cc2l7n/gsea_report_for_WT_1659444259661.tsv?dl=0"
+gsea_data_cre = "https://www.dropbox.com/s/vnsnhnujvl9ohnx/gsea_report_for_TERT_1659444259661.tsv?dl=0"
+title_name = "Upregulated Hallmarks in the Intestine of:"
+
+dotplot(gsea_data_wt, gsea_data_cre, title_name)
+
+```
+
